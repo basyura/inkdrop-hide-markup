@@ -49,3 +49,32 @@ test('編集後の構文に合わせて位置補正する', () => {
   assert.equal(tr.state.doc.toString(), '**a**');
   assert.equal(tr.state.selection.main.head, 5);
 });
+
+test('成立した二重チルダの削除記法のみを検出する', () => {
+  for (const text of ['~a~', '`~~a~~`', '```\n~~a~~\n```', '    ~~a~~', '\\~~a~~', '~~a', '~~ a ~~']) {
+    assert.deepEqual(markersFor(state(text, 0).doc), [], text);
+  }
+  assert.deepEqual(markersFor(state('~~a~~ ~~b~~', 0).doc).map(m => [m.from, m.to]), [[0,2],[3,5],[6,8],[9,11]]);
+  for (const text of ['**a ~~b~~ c**', '~~a **b** c~~']) {
+    assert.deepEqual(markersFor(state(text, 0).doc).map(m => [m.from, m.to]), [[0,2],[4,6],[7,9],[11,13]]);
+  }
+});
+
+test('削除記法でも選択方向・複数カーソルと Vim 行末位置を保持する', () => {
+  const s = state('x ~~ab~~ y', 0);
+  const tr = s.update({selection:EditorSelection.create([EditorSelection.range(1,3), EditorSelection.range(9,7)], 1)});
+  assert.equal(tr.state.selection.mainIndex, 1);
+  assert.deepEqual(tr.state.selection.ranges.map(r => [r.anchor,r.head]), [[1,4],[9,6]]);
+  assert.equal(state('~~ab~~', 2, true).update({selection:{anchor:5}}).state.selection.main.head, 3);
+});
+
+test('編集で削除記法が成立・不成立になったときに再判定する', () => {
+  const s = state('~~a~', 4);
+  const tr = s.update({changes:{from:4,insert:'~'}, selection:{anchor:4}});
+  assert.equal(markersFor(tr.state.doc).length, 2);
+  assert.equal(tr.state.doc.toString(), '~~a~~');
+  assert.equal(tr.state.selection.main.head, 5);
+  const broken = tr.state.update({changes:{from:4,to:5}}).state;
+  assert.deepEqual(markersFor(broken.doc), []);
+  assert.equal(broken.doc.toString(), '~~a~');
+});

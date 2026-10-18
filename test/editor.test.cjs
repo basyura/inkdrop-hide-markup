@@ -131,6 +131,122 @@ function press(view, key) {
   view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key, bubbles:true, cancelable:true}));
 }
 
+test('削除記法は通常・Vim 挿入モードで左右移動と外側への入力に対応する', () => {
+  for (const withVim of [false,true]) {
+    const view = editor(withVim,'x ~~ab~~ y');
+    try {
+      if (withVim) {
+        Vim.handleKey(view.cm,'<Esc>');
+        view.dispatch({selection:{anchor:5}});
+        press(view,'i');
+      }
+      assert.equal(view.contentDOM.textContent,'x ab y');
+      view.dispatch({selection:{anchor:4},userEvent:'select.pointer'});
+      assert.equal(view.state.selection.main.head,2);
+      press(view,'ArrowLeft');
+      assert.equal(view.state.selection.main.head,1);
+      press(view,'ArrowRight');
+      assert.equal(view.state.selection.main.head,2);
+      press(view,'ArrowRight');
+      assert.equal(view.state.selection.main.head,5);
+      press(view,'ArrowRight');
+      assert.equal(view.state.selection.main.head,8);
+      press(view,'ArrowLeft');
+      assert.equal(view.state.selection.main.head,5);
+      press(view,'ArrowRight');
+      view.dispatch(view.state.replaceSelection('XY'));
+      assert.equal(view.state.doc.toString(),'x ~~ab~~XY y');
+      view.dispatch({selection:{anchor:2}});
+      view.dispatch(view.state.replaceSelection('Z'));
+      assert.equal(view.state.doc.toString(),'x Z~~ab~~XY y');
+      assert.equal(view.contentDOM.textContent,'x ZabXY y');
+    } finally {view.destroy();}
+  }
+});
+
+test('削除記法でも Vim の回数指定・行頭行末移動と i I a を補正する', () => {
+  const view = editor(true,'x ~~ab~~ y');
+  try {
+    Vim.handleKey(view.cm,'<Esc>');
+    press(view,'3'); press(view,'l');
+    assert.equal(view.state.selection.main.head,5);
+    press(view,'2'); press(view,'h');
+    assert.equal(view.state.selection.main.head,1);
+    press(view,'$');
+    assert.equal(view.state.selection.main.head,9);
+    press(view,'0');
+    assert.equal(view.state.selection.main.head,0);
+  } finally {view.destroy();}
+  for (const [key,head,expected] of [['i',4,'x X~~ab~~ y'],['a',5,'x ~~ab~~X y'],['a',4,'x ~~aXb~~ y'],['I',5,'Xx ~~ab~~ y']]) {
+    const view = editor(true,'x ~~ab~~ y');
+    try {
+      Vim.handleKey(view.cm,'<Esc>');
+      view.dispatch({selection:{anchor:head}});
+      press(view,key);
+      assert.equal(view.cm.state.vim.insertMode,true);
+      view.dispatch(view.state.replaceSelection('X'));
+      assert.equal(view.state.doc.toString(),expected);
+    } finally {view.destroy();}
+  }
+  const indented = editor(true,'  ~~ab~~');
+  try {
+    Vim.handleKey(indented.cm,'<Esc>');
+    indented.dispatch({selection:{anchor:5}});
+    press(indented,'I');
+    indented.dispatch(indented.state.replaceSelection('X'));
+    assert.equal(indented.state.doc.toString(),'  X~~ab~~');
+  } finally {indented.destroy();}
+});
+
+test('削除記法は Enter で一時表示し、範囲外で再び隠す', () => {
+  for (const withVim of [false,true]) {
+    const view = editor(withVim,'x ~~ab~~ y **cd** z');
+    try {
+      if (withVim) Vim.handleKey(view.cm,'<Esc>');
+      view.dispatch({selection:{anchor:5}});
+      const event = new dom.window.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+      view.contentDOM.dispatchEvent(event);
+      assert.equal(event.defaultPrevented,true);
+      assert.equal(view.state.doc.toString(),'x ~~ab~~ y **cd** z');
+      assert.equal(view.contentDOM.textContent,'x ~~ab~~ y cd z');
+      for (const head of [2,3,6,7]) {
+        view.dispatch({selection:{anchor:head}});
+        assert.equal(view.state.selection.main.head,head);
+        assert.equal(view.contentDOM.textContent,'x ~~ab~~ y cd z');
+      }
+      view.dispatch({selection:{anchor:8}});
+      assert.equal(view.contentDOM.textContent,'x ab y cd z');
+    } finally {view.destroy();}
+  }
+  const view = editor(false,'x ~~ab~~ y');
+  try {
+    view.dispatch({selection:{anchor:5}});
+    press(view,'Enter');
+    press(view,'Enter');
+    assert.equal(view.state.doc.toString(),'x ~~a\nb~~ y');
+    assert.equal(view.contentDOM.textContent,'x ~~ab~~ y');
+    view.dispatch({selection:{anchor:view.state.doc.length}});
+    assert.equal(view.contentDOM.textContent,'x ab y');
+  } finally {view.destroy();}
+});
+
+test('削除記法と強調の入れ子は内側から表示し、外側の表示では両方表示する', () => {
+  for (const [doc,inner,outer] of [['**a ~~bc~~ d**','a ~~bc~~ d','**a ~~bc~~ d**'],['~~a **bc** d~~','a **bc** d','~~a **bc** d~~']]) {
+    const view = editor(false,doc);
+    try {
+      assert.equal(view.contentDOM.textContent,'a bc d');
+      view.dispatch({selection:{anchor:7}});
+      press(view,'Enter');
+      assert.equal(view.contentDOM.textContent,inner);
+      view.dispatch({selection:{anchor:3}});
+      assert.equal(view.contentDOM.textContent,'a bc d');
+      press(view,'Enter');
+      assert.equal(view.contentDOM.textContent,outer);
+      assert.equal(view.state.doc.toString(),doc);
+    } finally {view.destroy();}
+  }
+});
+
 test('Vim の左端の i は開始記号の前から挿入し、入力後も外側を維持する', () => {
   for (const [doc, from] of [['**ab**',0], ['x **ab** y',2], ['***ab***',1]]) {
     const view = editor(true,doc);
