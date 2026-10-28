@@ -22,6 +22,194 @@ function editor(withVim, doc = 'x **ab** y') {
   return view;
 }
 
+test('Vim Visual の左右移動は非表示記号で止まらない', () => {
+  for (const marker of ['**', '~~']) {
+    const view = editor(true, `x ${marker}ab${marker} y`);
+    const cm = getCM(view);
+    const press = key => view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key, keyCode:key.toUpperCase().charCodeAt(0), bubbles:true, cancelable:true,
+    }));
+    try {
+      press('v');
+      for (const expected of [1, 4, 5, 8, 9]) {
+        press('l');
+        assert.equal(cm.state.vim.sel.head.ch, expected);
+      }
+      for (const expected of [8, 5, 4, 1, 0]) {
+        press('h');
+        assert.equal(cm.state.vim.sel.head.ch, expected);
+      }
+    } finally { view.destroy(); }
+  }
+});
+
+test('Vim Visual の回数指定は非表示記号を数えない', () => {
+  for (const marker of ['**', '~~']) {
+    const view = editor(true, `x ${marker}ab${marker} y`);
+    const cm = getCM(view);
+    const press = key => view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key, keyCode:key.toUpperCase().charCodeAt(0), bubbles:true, cancelable:true,
+    }));
+    try {
+      press('v'); press('3'); press('l');
+      assert.equal(cm.state.vim.sel.head.ch, 5);
+      press('3'); press('h');
+      assert.equal(cm.state.vim.sel.head.ch, 0);
+    } finally { view.destroy(); }
+  }
+});
+
+test('Visual で強調末尾を選択してもブロックカーソルは本文を示す', async () => {
+  const view = editor(true, 'x **ab** y');
+  const cm = getCM(view);
+  const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+  try {
+    const layer = document.createElement('div');
+    layer.className = 'cm-vimCursorLayer';
+    const cursor = document.createElement('span');
+    cursor.className = 'cm-cursor-primary';
+    cursor.style.left = '30px';
+    cursor.textContent = '*';
+    cursor.getBoundingClientRect = () => ({left:30});
+    layer.appendChild(cursor);
+    view.scrollDOM.appendChild(layer);
+    view.coordsForChar = () => ({left:20});
+    view.dispatch({selection:{anchor:4}});
+    key('v'); key('l');
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    assert.equal(cm.state.vim.sel.head.ch, 5);
+    assert.equal(cursor.textContent, 'b');
+    assert.equal(cursor.style.left, '20px');
+  } finally { view.destroy(); }
+});
+
+test('他の拡張が未補正の Vim 位置を設定しても Visual 移動を同期する', async () => {
+  let view;
+  let overwrite = false;
+  const block = () => !!view?.cm?.state.vim && !view.cm.state.vim.insertMode && !view.cm.state.vim.visualMode;
+  const other = EditorView.updateListener.of(update => {
+    if (overwrite && update.selectionSet && view.cm?.state.vim?.visualMode) {
+      view.cm.state.vim.sel.head = {line:0, ch:2};
+    }
+  });
+  view = new EditorView({parent:document.body, state:EditorState.create({
+    doc:'x **ab** y', extensions:[vim(), createExtension(block), other],
+  })});
+  const cm = getCM(view);
+  const press = key => view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+    key, keyCode:key.toUpperCase().charCodeAt(0), bubbles:true, cancelable:true,
+  }));
+  try {
+    press('v'); press('l');
+    overwrite = true;
+    press('l');
+    await Promise.resolve();
+    assert.equal(cm.state.vim.sel.head.ch, 4);
+  } finally { view.destroy(); }
+});
+
+test('Vim の Visual 選択で強調と削除の全体を yank する', () => {
+  for (const marker of ['**', '~~']) {
+    for (const reverse of [false, true]) {
+      const view = editor(true, `x ${marker}ab${marker} y`);
+      const cm = getCM(view);
+      try {
+        const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+        view.dispatch({selection:{anchor:reverse ? 5 : 4}});
+        key('v');
+        key(reverse ? 'h' : 'l');
+        assert.equal(view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to), `${marker}ab${marker}`);
+        key('y');
+        key('$');
+        key('p');
+        assert.equal(view.state.doc.toString(), `x ${marker}ab${marker} y${marker}ab${marker}`);
+      } finally { view.destroy(); }
+    }
+  }
+});
+
+test('Vim の Visual 選択は範囲の拡大と縮小で記号を調整する', () => {
+  for (const marker of ['**', '~~']) {
+    const view = editor(true, `x ${marker}abc${marker} y`);
+    const cm = getCM(view);
+    const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+    const selected = () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
+    try {
+      view.dispatch({selection:{anchor:4}});
+      key('v');
+      key('l');
+      assert.equal(selected(), 'ab');
+      key('l');
+      assert.equal(selected(), `${marker}abc${marker}`);
+      key('h');
+      assert.equal(selected(), 'ab');
+      key('l');
+      key('l');
+      assert.equal(selected(), `${marker}abc${marker} `);
+      key('h');
+      assert.equal(selected(), `${marker}abc${marker}`);
+    } finally { view.destroy(); }
+  }
+});
+
+test('Vim の Visual 変更は選択全体の先頭から入力する', () => {
+  const view = editor(true, 'x **ab** y');
+  const cm = getCM(view);
+  const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+  try {
+    view.dispatch({selection:{anchor:4}});
+    key('v'); key('l'); key('c');
+    assert.equal(view.state.doc.toString(), 'x  y');
+    assert.equal(view.state.selection.main.head, 2);
+  } finally { view.destroy(); }
+});
+
+test('Vim の Visual 削除は選択された記法を削除して貼り付けられる', () => {
+  for (const marker of ['**', '~~']) for (const reverse of [false, true]) for (const command of ['d', 'x']) {
+    const view = editor(true, `x ${marker}ab${marker} y`);
+    const cm = getCM(view);
+    const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+    try {
+      view.dispatch({selection:{anchor:reverse ? 5 : 4}});
+      key('v'); key(reverse ? 'h' : 'l');
+      view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:command, keyCode:command.toUpperCase().charCodeAt(0), bubbles:true, cancelable:true}));
+      assert.equal(view.state.doc.toString(), 'x  y');
+      key('$'); key('p');
+      assert.equal(view.state.doc.toString(), `x  y${marker}ab${marker}`);
+    } finally { view.destroy(); }
+  }
+});
+
+test('Vim の Visual 部分選択の削除は記号を残す', () => {
+  for (const marker of ['**', '~~']) for (const command of ['d', 'x']) {
+    const view = editor(true, `x ${marker}abc${marker} y`);
+    const cm = getCM(view);
+    const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+    try {
+      view.dispatch({selection:{anchor:4}});
+      key('v'); key('l');
+      view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key:command, keyCode:command.toUpperCase().charCodeAt(0), bubbles:true, cancelable:true}));
+      assert.equal(view.state.doc.toString(), `x ${marker}c${marker} y`);
+    } finally { view.destroy(); }
+  }
+});
+
+test('Vim の Visual 選択は入れ子の記号を含め、部分選択では外側を含めない', () => {
+  const view = editor(true, 'x **a~~b~~c** y');
+  const cm = getCM(view);
+  const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+  const selected = () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
+  try {
+    view.dispatch({selection:{anchor:4}});
+    key('v'); key('l');
+    assert.equal(selected(), 'a~~b~~');
+    key('l');
+    assert.equal(selected(), '**a~~b~~c**');
+    key('h');
+    assert.equal(selected(), 'a~~b~~');
+  } finally { view.destroy(); }
+});
+
 test('通常の左右移動に記号ぶんの停止がない', () => {
   const view = editor(false);
   try {
