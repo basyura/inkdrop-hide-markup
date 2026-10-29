@@ -73,19 +73,115 @@ test('Visual で強調末尾を選択してもブロックカーソルは本文�
     cursor.getBoundingClientRect = () => ({left:30});
     layer.appendChild(cursor);
     view.scrollDOM.appendChild(layer);
-    view.coordsForChar = () => ({left:20});
+    view.coordsForChar = () => ({left:20, top:0});
     view.dispatch({selection:{anchor:4}});
     key('v'); key('l');
     await new Promise(resolve => requestAnimationFrame(resolve));
     assert.equal(cm.state.vim.sel.head.ch, 5);
-    assert.equal(cursor.textContent, 'b');
-    assert.equal(cursor.style.left, '20px');
+    const visualCursor = view.scrollDOM.querySelector('.hide-markup-cursor-layer .cm-cursor-primary');
+    assert.equal(visualCursor.textContent, 'b');
+    assert.equal(visualCursor.style.left, '20px');
+    assert.equal(cursor.style.visibility, 'hidden');
+    assert.equal(cursor.textContent, '*');
+    assert.equal(cursor.style.left, '30px');
     key('Escape');
     view.dispatch({selection:{anchor:0}});
     await new Promise(resolve => requestAnimationFrame(resolve));
     assert.equal(cursor.textContent, '*');
     assert.equal(cursor.style.left, '30px');
+    assert.equal(cursor.style.visibility, '');
+    assert.equal(view.scrollDOM.querySelector('.hide-markup-cursor-layer').childElementCount, 0);
   } finally { view.destroy(); }
+});
+
+test('Visual の記号補正後に Vim が再描画した横位置を古い値で戻さない', async () => {
+  for (const marker of ['**', '~~']) {
+    const text = `み${marker}込む数${marker}の`;
+    const view = editor(true, text);
+    const cm = getCM(view);
+    const layer = document.createElement('div');
+    layer.className = 'cm-vimCursorLayer';
+    const cursor = document.createElement('span');
+    cursor.className = 'cm-cursor-primary';
+    cursor.getBoundingClientRect = () => ({left:parseFloat(cursor.style.left)});
+    layer.appendChild(cursor);
+    view.scrollDOM.appendChild(layer);
+    view.coordsForChar = head => ({left:head * 10, top:0});
+    const press = key => view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key, keyCode:key.toUpperCase().charCodeAt(0), bubbles:true, cancelable:true,
+    }));
+    try {
+      for (const [key, expected] of [
+        ['v', 0], ['l', 3], ['l', 4], ['l', 5], ['l', 8],
+        ['h', 5], ['h', 4], ['h', 3], ['h', 0],
+      ]) {
+        press(key);
+        // Simulate codemirror-vim's measured cursor draw after the selection
+        // update, using the CodeMirror endpoint rather than the logical head.
+        const range = view.state.selection.main;
+        const renderedHead = range.anchor < range.head ? range.head - 1 : range.head;
+        cursor.style.left = `${renderedHead * 10}px`;
+        cursor.textContent = text[renderedHead];
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        assert.equal(cm.state.vim.sel.head.ch, expected, `${marker}: ${key}`);
+        const visualCursor = view.scrollDOM.querySelector('.hide-markup-cursor-layer .cm-cursor-primary');
+        const visibleCursor = visualCursor || cursor;
+        assert.equal(visibleCursor.style.left, `${expected * 10}px`, `${marker}: ${key}`);
+        assert.equal(visibleCursor.textContent, text[expected], `${marker}: ${key}`);
+        // A late Vim draw must not move the visible cursor onto a delimiter.
+        cursor.style.left = `${renderedHead * 10}px`;
+        cursor.textContent = text[renderedHead];
+        assert.equal(visibleCursor.style.left, `${expected * 10}px`, `${marker}: late ${key}`);
+        assert.equal(visibleCursor.textContent, text[expected], `${marker}: late ${key}`);
+      }
+    } finally { view.destroy(); }
+  }
+});
+
+test('Visual の専用カーソルはスクロール座標と Vim のカーソル再生成に追従して破棄時に戻す', async () => {
+  const view = editor(true, 'み**込む数**の');
+  const cm = getCM(view);
+  const layer = document.createElement('div');
+  layer.className = 'cm-vimCursorLayer';
+  let native = document.createElement('span');
+  native.className = 'cm-cursor-primary';
+  native.style.left = '70px';
+  native.textContent = '*';
+  layer.appendChild(native);
+  view.scrollDOM.appendChild(layer);
+  view.scrollDOM.getBoundingClientRect = () => ({left:100, top:200});
+  view.scrollDOM.scrollLeft = 10;
+  view.scrollDOM.scrollTop = 30;
+  view.coordsForChar = () => ({left:120, top:240});
+  const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+  try {
+    view.dispatch({selection:{anchor:3}});
+    key('v'); key('l'); key('l');
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    const selector = '.hide-markup-cursor-layer .cm-cursor-primary';
+    let cursor = view.scrollDOM.querySelector(selector);
+    assert.equal(cursor.textContent, '数');
+    assert.equal(cursor.style.left, '30px');
+    assert.equal(cursor.style.top, '70px');
+    assert.equal(native.style.visibility, 'hidden');
+
+    const replacement = document.createElement('span');
+    replacement.className = 'cm-cursor-primary';
+    replacement.style.left = '90px';
+    replacement.textContent = '*';
+    native.replaceWith(replacement);
+    const previous = native;
+    native = replacement;
+    await Promise.resolve();
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    cursor = view.scrollDOM.querySelector(selector);
+    assert.equal(cursor.textContent, '数');
+    assert.equal(cursor.style.left, '30px');
+    assert.equal(previous.style.visibility, '');
+    assert.equal(native.style.visibility, 'hidden');
+  } finally { view.destroy(); }
+  assert.equal(native.style.visibility, '');
+  assert.equal(view.scrollDOM.querySelector('.hide-markup-cursor-layer'), null);
 });
 
 test('他の拡張が未補正の Vim 位置を設定しても Visual 移動を同期する', async () => {
@@ -213,6 +309,94 @@ test('Vim の Visual 選択は入れ子の記号を含め、部分選択では�
     key('h');
     assert.equal(selected(), 'a~~b~~');
   } finally { view.destroy(); }
+});
+
+test('Visual は両端が入れ子の記号でも全体を選択し、縮めると部分選択に戻る', () => {
+  for (const syntax of ['**~~ab~~**', '~~**ab**~~']) for (const reverse of [false, true]) {
+    const view = editor(true, `x ${syntax} y`);
+    const cm = getCM(view);
+    const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+    const selected = () => view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to);
+    try {
+      const start = view.state.doc.toString().indexOf(reverse ? 'b' : 'a');
+      view.dispatch({selection:{anchor:start}});
+      key('v'); key(reverse ? 'h' : 'l');
+      assert.equal(selected(), syntax);
+      assert.equal(view.state.selection.main.anchor > view.state.selection.main.head, reverse);
+      key(reverse ? 'l' : 'h');
+      assert.equal(selected(), reverse ? 'b' : 'a');
+      assert.equal(cm.state.vim.sel.head.ch, start);
+    } finally { view.destroy(); }
+  }
+});
+
+test('Visual の回数指定で隣接する強調と削除を選択してコピーする', () => {
+  for (const reverse of [false, true]) {
+    const syntax = '**ab**~~cd~~';
+    const view = editor(true, `x ${syntax} y`);
+    const cm = getCM(view);
+    const press = key => view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+      key, keyCode:key.toUpperCase().charCodeAt(0), bubbles:true, cancelable:true,
+    }));
+    try {
+      view.dispatch({selection:{anchor:view.state.doc.toString().indexOf(reverse ? 'd' : 'a')}});
+      press('v'); press('3'); press(reverse ? 'h' : 'l');
+      const range = view.state.selection.main;
+      assert.equal(view.state.sliceDoc(range.from, range.to), syntax);
+      assert.equal(range.anchor > range.head, reverse);
+      press('y'); press('$'); press('p');
+      assert.equal(view.state.doc.toString(), `x ${syntax} y${syntax}`);
+    } finally { view.destroy(); }
+  }
+});
+
+test('Visual の変更は別の行でも記号を含む削除範囲の先頭から入力する', () => {
+  for (const marker of ['**', '~~']) for (const reverse of [false, true]) {
+    const view = editor(true, `first\nx ${marker}ab${marker} y`);
+    const cm = getCM(view);
+    const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+    try {
+      const text = view.state.doc.toString();
+      view.dispatch({selection:{anchor:text.indexOf(reverse ? 'b' : 'a', 6)}});
+      key('v'); key(reverse ? 'h' : 'l'); key('c');
+      assert.equal(view.state.doc.toString(), 'first\nx  y');
+      assert.equal(view.state.selection.main.head, 8);
+      view.dispatch(view.state.replaceSelection('Z'));
+      assert.equal(view.state.doc.toString(), 'first\nx Z y');
+    } finally { view.destroy(); }
+  }
+});
+
+test('一時表示中の記号は Visual の部分選択を拡張しない', () => {
+  for (const marker of ['**', '~~']) {
+    const view = editor(true, `x ${marker}ab${marker} y`);
+    const cm = getCM(view);
+    const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+    try {
+      view.dispatch({selection:{anchor:4}});
+      view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', {
+        key:'Enter', keyCode:13, bubbles:true, cancelable:true,
+      }));
+      key('v'); key('l');
+      assert.equal(view.state.sliceDoc(view.state.selection.main.from, view.state.selection.main.to), 'ab');
+      assert.equal(cm.state.vim.sel.head.ch, 5);
+    } finally { view.destroy(); }
+  }
+});
+
+test('行選択と矩形選択では文字単位の Visual 補正を適用しない', () => {
+  for (const [mode, expected] of [['V', 'x **ab** y'], ['<C-v>', 'ab']]) {
+    const view = editor(true, 'x **ab** y');
+    const cm = getCM(view);
+    const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
+    try {
+      view.dispatch({selection:{anchor:4}});
+      key(mode); key('l');
+      const selection = view.state.selection.main;
+      assert.equal(view.state.sliceDoc(selection.from, selection.to), expected);
+      assert.equal(cm.state.vim.sel.head.ch, 5);
+    } finally { view.destroy(); }
+  }
 });
 
 test('通常の左右移動に記号ぶんの停止がない', () => {
