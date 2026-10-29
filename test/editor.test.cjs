@@ -59,7 +59,7 @@ test('Vim Visual の回数指定は非表示記号を数えない', () => {
   }
 });
 
-test('Visual で強調末尾を選択してもブロックカーソルは本文を示す', async () => {
+test('Visual で強調末尾を選択してもブロックカーソルは本文を示し、終了時に表示を戻す', async () => {
   const view = editor(true, 'x **ab** y');
   const cm = getCM(view);
   const key = value => cm.operation(() => { cm.curOp.isVimOp = true; Vim.handleKey(cm, value); });
@@ -80,6 +80,11 @@ test('Visual で強調末尾を選択してもブロックカーソルは本文�
     assert.equal(cm.state.vim.sel.head.ch, 5);
     assert.equal(cursor.textContent, 'b');
     assert.equal(cursor.style.left, '20px');
+    key('Escape');
+    view.dispatch({selection:{anchor:0}});
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    assert.equal(cursor.textContent, '*');
+    assert.equal(cursor.style.left, '30px');
   } finally { view.destroy(); }
 });
 
