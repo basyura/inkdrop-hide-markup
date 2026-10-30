@@ -4,6 +4,67 @@ const { EditorState } = require("@codemirror/state");
 const { markersFor } = require("../lib/markers");
 const { VimSelection } = require("../lib/vim-selection");
 
+test("変更後の挿入位置は同じ操作の単一カーソルが元の要求位置にある場合だけ補正する", () => {
+  const operation = {};
+  const change = { operation, head: 0, requestedHead: 2 };
+  const cursor = { empty: true, head: 2 };
+  const single = { ranges: [cursor], main: cursor };
+  const range = { empty: false, head: 2 };
+  const otherCursor = { empty: true, head: 3 };
+  for (const [reservation, view, selection, expected] of [
+    [
+      change,
+      { cm: { curOp: operation, state: { vim: { insertMode: true } } } },
+      single,
+      0,
+    ],
+    [null, null, single, null],
+    [change, null, single, null],
+    [
+      change,
+      { cm: { curOp: {}, state: { vim: { insertMode: true } } } },
+      single,
+      null,
+    ],
+    [
+      change,
+      { cm: { curOp: operation, state: { vim: { insertMode: false } } } },
+      single,
+      null,
+    ],
+    [change, { cm: { curOp: operation, state: {} } }, single, null],
+    [
+      change,
+      { cm: { curOp: operation, state: { vim: { insertMode: true } } } },
+      undefined,
+      null,
+    ],
+    [
+      change,
+      { cm: { curOp: operation, state: { vim: { insertMode: true } } } },
+      { ranges: [cursor, otherCursor], main: cursor },
+      null,
+    ],
+    [
+      change,
+      { cm: { curOp: operation, state: { vim: { insertMode: true } } } },
+      { ranges: [range], main: range },
+      null,
+    ],
+    [
+      change,
+      { cm: { curOp: operation, state: { vim: { insertMode: true } } } },
+      { ranges: [otherCursor], main: otherCursor },
+      null,
+    ],
+  ]) {
+    const vimSelection = new VimSelection();
+    vimSelection.change = reservation;
+    vimSelection.view = view;
+    assert.equal(vimSelection.changeCursor({ selection }), expected);
+  }
+});
+
 test("Vim 移動は入力バッファの回数を優先し、空なら getRepeat の回数で予約する", async () => {
   for (const marker of ["**", "~~"]) {
     for (const keyBuffer of [["3"], []]) {
