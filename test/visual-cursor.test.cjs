@@ -77,4 +77,41 @@ test("専用カーソルは描画対象がなくても DOM の監視を再開す
     scrollDOM.querySelector(".hide-markup-cursor-layer").childElementCount,
     0
   );
+
+  await t.test(
+    "標準カーソルと論理位置が一致する場合は座標計測も描画も行わない",
+    () => {
+      head = 7;
+      const calls = fallbackCalls;
+      const position = measurement.read();
+      assert.equal(position, null);
+      assert.equal(fallbackCalls, calls);
+
+      measurement.write(position);
+      assert.equal(native.style.visibility, "visible");
+      assert.equal(
+        scrollDOM.querySelector(".hide-markup-cursor-layer").childElementCount,
+        0
+      );
+    }
+  );
+
+  await t.test(
+    "破棄後は予約済みの計測・描画や追加予約でカーソルを再作成しない",
+    () => {
+      head = 5;
+      const position = measurement.read();
+      measurement.write(position);
+      assert.equal(native.style.visibility, "hidden");
+
+      cursor.destroy();
+      const before = scheduled;
+      cursor.schedule();
+      assert.equal(scheduled, before);
+      assert.equal(measurement.read(), null);
+      measurement.write(position);
+      assert.equal(native.style.visibility, "visible");
+      assert.equal(scrollDOM.querySelector(".hide-markup-cursor-layer"), null);
+    }
+  );
 });
