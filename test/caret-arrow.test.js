@@ -1,9 +1,9 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { JSDOM } = require("jsdom");
-const { EditorState } = require("@codemirror/state");
-const { EditorView } = require("@codemirror/view");
-const { createExtension } = require("../lib/extension");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
+import { EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { createExtension } from "../lib/extension.js";
 
 test("記号境界の補正後も同じ矢印入力で本文へ進み、修飾キー付きでは進めない", (t) => {
   const dom = new JSDOM("<!doctype html><body></body>", {

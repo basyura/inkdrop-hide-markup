@@ -1,9 +1,9 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { JSDOM } = require("jsdom");
-const { EditorState } = require("@codemirror/state");
-const { Direction } = require("@codemirror/view");
-const { createVisualCursor } = require("../lib/visual-cursor");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
+import { EditorState } from "@codemirror/state";
+import { Direction } from "@codemirror/view";
+import { createVisualCursor } from "../lib/visual-cursor.js";
 
 test("専用カーソルは描画対象がなくても DOM の監視を再開する", async (t) => {
   const dom = new JSDOM("<!doctype html><body></body>");

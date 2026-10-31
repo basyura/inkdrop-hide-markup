@@ -1,25 +1,40 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const extension = require("../lib/extension");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { EditorState } from "@codemirror/state";
+import * as plugin from "../lib/hide-markup.js";
+
+test("package.json のエントリから ES Module としてライフサイクル関数を読み込める", async () => {
+  const packageUrl = new URL("../package.json", import.meta.url);
+  const manifest = JSON.parse(await readFile(packageUrl, "utf8"));
+  assert.equal(manifest.type, "module");
+  const entry = await import(new URL(manifest.main, packageUrl).href);
+  assert.equal(entry, plugin);
+  assert.equal(typeof entry.activate, "function");
+  assert.equal(typeof entry.deactivate, "function");
+});
 
 test("ブロックカーソル判定は Vim 内部状態を優先し、取得できなければ DOM のモードを使う", (t) => {
-  let isBlockCursor;
-  t.mock.method(extension, "createExtension", (predicate) => {
-    isBlockCursor = predicate;
-    return [];
-  });
-  const plugin = require("../lib/hide-markup");
+  let extension;
   let activeView = null;
   global.document = { body: {} };
   global.inkdrop = {
     getActiveEditor: () => activeView,
     ensureEditorLoaded() {},
-    commands: { dispatch() {} },
+    commands: {
+      dispatch(target, command, args) {
+        extension = args.extension;
+      },
+    },
   };
   t.after(() => delete global.inkdrop);
   t.after(() => delete global.document);
   plugin.activate();
-  assert.equal(isBlockCursor(), false);
+  plugin.deactivate();
+  const state = EditorState.create({ doc: "**ab**", extensions: extension });
+  const cursorPosition = () =>
+    state.update({ selection: { anchor: 2 } }).state.selection.main.head;
+  assert.equal(cursorPosition(), 0);
 
   for (const [vim, vimEnabled, modeClasses, expected] of [
     [{ insertMode: false, visualMode: false }, false, ["vim-mode-insert"], true],
@@ -41,8 +56,8 @@ test("ブロックカーソル判定は Vim 内部状態を優先し、取得で
       dom: { classList: { contains: (name) => modeClasses.includes(name) } },
     };
     assert.equal(
-      isBlockCursor(),
-      expected,
+      cursorPosition(),
+      expected ? 2 : 0,
       JSON.stringify({ vim, vimEnabled, modeClasses })
     );
   }
@@ -50,7 +65,6 @@ test("ブロックカーソル判定は Vim 内部状態を優先し、取得で
 });
 
 test("ロード前でも作成済みの拡張を解除し、無効化を繰り返しても再通知しない", (t) => {
-  const plugin = require("../lib/hide-markup");
   const dispatch = t.mock.fn();
   global.document = { body: {} };
   global.inkdrop = {

@@ -1,8 +1,8 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { EditorState, EditorSelection } = require("@codemirror/state");
-const { markersFor } = require("../lib/markers");
-const { visualSelection } = require("../lib/selection");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { EditorState, EditorSelection } from "@codemirror/state";
+import { markersFor } from "../lib/markers.js";
+import { visualSelection } from "../lib/selection.js";
 
 test("Visual 選択は混在した入れ子の全体・部分選択で方向と記号を保持する", () => {
   const { doc } = EditorState.create({ doc: "**a ~~bc~~ d**" });

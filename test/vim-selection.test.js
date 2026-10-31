@@ -1,8 +1,8 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { EditorState } = require("@codemirror/state");
-const { markersFor } = require("../lib/markers");
-const { VimSelection } = require("../lib/vim-selection");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { EditorState } from "@codemirror/state";
+import { markersFor } from "../lib/markers.js";
+import { VimSelection } from "../lib/vim-selection.js";
 
 test("変更後の挿入位置は同じ操作の単一カーソルが元の要求位置にある場合だけ補正する", () => {
   const operation = {};

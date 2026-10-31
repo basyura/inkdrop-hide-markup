@@ -1,14 +1,14 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { EditorSelection } = require("@codemirror/state");
-const {
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { EditorSelection } from "@codemirror/state";
+import {
   canNormalizeInsertionCursor,
   canHandleCaretArrow,
   canHandleMarkupReveal,
   canHandleVimInsertion,
   canPrepareVisualDeletion,
   canReserveVimMotion,
-} = require("../lib/key-conditions");
+} from "../lib/key-conditions.js";
 
 const cursor = EditorSelection.single(4);
 const selected = EditorSelection.single(4, 6);

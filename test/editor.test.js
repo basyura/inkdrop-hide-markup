@@ -1,6 +1,7 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { JSDOM } = require("jsdom");
+import * as plugin from "../lib/hide-markup.js";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 const dom = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true });
 for (const key of [
   "window",
@@ -27,17 +28,17 @@ dom.window.Range.prototype.getBoundingClientRect = () => ({
   width: 0,
   height: 0,
 });
-const { EditorState, Prec } = require("@codemirror/state");
-const { EditorView, keymap } = require("@codemirror/view");
-const {
+import { EditorState, Prec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import {
   defaultKeymap,
   cursorCharLeft,
   cursorCharRight,
   cursorLineStart,
   cursorLineEnd,
-} = require("@codemirror/commands");
-const { vim, Vim, getCM } = require("@replit/codemirror-vim");
-const { createExtension } = require("../lib/extension");
+} from "@codemirror/commands";
+const { vim, Vim, getCM } = await import("@replit/codemirror-vim");
+import { createExtension } from "../lib/extension.js";
 
 function editor(withVim, doc = "x **ab** y") {
   let view;
@@ -720,7 +721,6 @@ test("有効化・エディタ再生成・無効化で装飾と登録を管理�
     parent: document.body,
     state: EditorState.create({ doc: "**a**" }),
   });
-  const plugin = require("../lib/hide-markup");
   let registered = [];
   let additions = 0;
   function openNote(doc) {
@@ -770,7 +770,6 @@ test("有効化・エディタ再生成・無効化で装飾と登録を管理�
 });
 
 test("無効化後の遅延ロードと古いロード通知では登録しない", (t) => {
-  const plugin = require("../lib/hide-markup");
   const callbacks = [];
   let additions = 0;
   const registered = new Set();

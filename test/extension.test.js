@@ -1,8 +1,8 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { EditorState, EditorSelection } = require("@codemirror/state");
-const { markersFor } = require("../lib/markers");
-const { createExtension } = require("../lib/extension");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { EditorState, EditorSelection } from "@codemirror/state";
+import { markersFor } from "../lib/markers.js";
+import { createExtension } from "../lib/extension.js";
 
 function state(doc, head, block = false) {
   return EditorState.create({
