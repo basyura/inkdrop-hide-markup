@@ -10,10 +10,15 @@ test("ブロックカーソル判定は Vim 内部状態を優先し、取得で
   });
   const plugin = require("../lib/hide-markup");
   let activeView = null;
-  plugin.activate({
+  global.document = { body: {} };
+  global.inkdrop = {
     getActiveEditor: () => activeView,
     ensureEditorLoaded() {},
-  });
+    commands: { dispatch() {} },
+  };
+  t.after(() => delete global.inkdrop);
+  t.after(() => delete global.document);
+  plugin.activate();
   assert.equal(isBlockCursor(), false);
 
   for (const [vim, vimEnabled, modeClasses, expected] of [
@@ -42,4 +47,28 @@ test("ブロックカーソル判定は Vim 内部状態を優先し、取得で
     );
   }
   plugin.deactivate();
+});
+
+test("ロード前でも作成済みの拡張を解除し、無効化を繰り返しても再通知しない", (t) => {
+  const plugin = require("../lib/hide-markup");
+  const dispatch = t.mock.fn();
+  global.document = { body: {} };
+  global.inkdrop = {
+    ensureEditorLoaded() {},
+    commands: { dispatch },
+  };
+  t.after(() => delete global.inkdrop);
+  t.after(() => delete global.document);
+
+  plugin.deactivate();
+  assert.equal(dispatch.mock.callCount(), 0);
+  plugin.activate();
+  plugin.deactivate();
+  assert.equal(dispatch.mock.callCount(), 1);
+  const [target, command, { extension: removed }] = dispatch.mock.calls[0].arguments;
+  assert.equal(target, document.body);
+  assert.equal(command, "editor:remove-extension");
+  assert.ok(removed);
+  plugin.deactivate();
+  assert.equal(dispatch.mock.callCount(), 1);
 });
